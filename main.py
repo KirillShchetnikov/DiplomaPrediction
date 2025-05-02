@@ -1,9 +1,12 @@
+
+# app.py
 import numpy as np
 import streamlit as st
 import joblib
 import tensorflow as tf
+from collections import Counter
 
-# Загрузка предобученных моделей и связанных артефактов
+# Загрузка предобученных моделей и артефактов
 model_shielding = tf.keras.models.load_model('model_ee.keras')
 le_shielding = joblib.load('le_ee.pkl')
 avg_eff_shielding = joblib.load('avg_eff_ee.pkl')
@@ -16,18 +19,24 @@ model_reflection = tf.keras.models.load_model('model_ko.keras')
 le_reflection = joblib.load('le_ko.pkl')
 avg_eff_reflection = joblib.load('avg_eff_ko.pkl')
 
-# Функция универсального предсказания
-def predict_material(model, le, frequency):
-    pred = model.predict(np.array([[frequency]]))
-    idx = np.argmax(pred)
-    material = le.inverse_transform([idx])[0]
-    confidence = pred[0][idx]
+# Универсальная функция предсказания наиболее частого материала
+
+def predict_most_frequent_material(model, le, freq_start, freq_end):
+    freqs = np.arange(freq_start, freq_end + 1, 1)
+    predictions = []
+    for f in freqs:
+        pred = model.predict(np.array([[f]]), verbose=0)
+        idx = np.argmax(pred)
+        predictions.append(idx)
+    most_common_idx = Counter(predictions).most_common(1)[0][0]
+    material = le.inverse_transform([most_common_idx])[0]
+    confidence = predictions.count(most_common_idx) / len(predictions)
     return material, confidence
 
-# Функции для формирования композита
+# Функции для формирования композитов
 
-def create_shielding_composite(frequency, min_value):
-    material, conf = predict_material(model_shielding, le_shielding, frequency)
+def create_shielding_composite(freq_start, freq_end, min_value):
+    material, conf = predict_most_frequent_material(model_shielding, le_shielding, freq_start, freq_end)
     avg = avg_eff_shielding.get(material, 0)
     if avg < min_value:
         desc = f"Предсказанный материал — {material} (средняя {avg:.3f}) не удовлетворяет min={min_value}."
@@ -42,8 +51,8 @@ def create_shielding_composite(frequency, min_value):
     }
 
 
-def create_absorption_composite(frequency, min_value):
-    material, conf = predict_material(model_absorption, le_absorption, frequency)
+def create_absorption_composite(freq_start, freq_end, min_value):
+    material, conf = predict_most_frequent_material(model_absorption, le_absorption, freq_start, freq_end)
     avg = avg_eff_absorption.get(material, 0)
     if avg < min_value:
         desc = f"Предсказанный материал — {material} (среднее {avg:.3f}) не удовлетворяет min={min_value}."
@@ -58,8 +67,8 @@ def create_absorption_composite(frequency, min_value):
     }
 
 
-def create_reflection_composite(frequency, min_value):
-    material, conf = predict_material(model_reflection, le_reflection, frequency)
+def create_reflection_composite(freq_start, freq_end, min_value):
+    material, conf = predict_most_frequent_material(model_reflection, le_reflection, freq_start, freq_end)
     avg = avg_eff_reflection.get(material, 0)
     if avg < min_value:
         desc = f"Предсказанный материал — {material} (среднее {avg:.3f}) не удовлетворяет min={min_value}."
@@ -79,16 +88,18 @@ criteria = st.selectbox(
     "Критерий оптимизации:",
     ["Эффективность экранирования", "Коэффициент поглощения", "Коэффициент отражения"]
 )
-frequency = st.number_input("Частота", value=1.0)
+
+freq_start = st.number_input("Начальная частота", value=1.0)
+freq_end = st.number_input("Конечная частота", value=10.0)
 min_val = st.number_input("Минимальное требуемое значение", value=1.0)
 
 if st.button("Рассчитать"):
     if criteria == "Эффективность экранирования":
-        comp = create_shielding_composite(frequency, min_val)
+        comp = create_shielding_composite(freq_start, freq_end, min_val)
     elif criteria == "Коэффициент поглощения":
-        comp = create_absorption_composite(frequency, min_val)
+        comp = create_absorption_composite(freq_start, freq_end, min_val)
     else:
-        comp = create_reflection_composite(frequency, min_val)
+        comp = create_reflection_composite(freq_start, freq_end, min_val)
 
     st.subheader("Итоговый состав:")
     for layer, detail in comp.items():
