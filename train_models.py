@@ -17,7 +17,7 @@ def train_and_save(dataset_path, model_path, encoder_path, avg_eff_path):
     data.dropna(subset=['frequency', eff_col], inplace=True)
 
     # Вход и метки
-    X = data['frequency'].values.reshape(-1, 1)
+    X = data[['frequency', eff_col]].values
     le = LabelEncoder()
     y_enc = le.fit_transform(data['material'])
     num_classes = len(le.classes_)
@@ -28,7 +28,7 @@ def train_and_save(dataset_path, model_path, encoder_path, avg_eff_path):
 
     # Построение и обучение модели
     model = Sequential([
-        Dense(10, activation='relu', input_shape=(1,)),
+        Dense(10, activation='relu', input_shape=(2,)),
         Dense(10, activation='relu'),
         Dense(num_classes, activation='softmax')
     ])

@@ -25,7 +25,8 @@ def predict_most_frequent_material(model, le, freq_start, freq_end):
     freqs = np.arange(freq_start, freq_end + 1, 1)
     predictions = []
     for f in freqs:
-        pred = model.predict(np.array([[f]]), verbose=0)
+        input_data = np.array([[f, min_val]])  # два признака
+        pred = model.predict(input_data, verbose=0)
         idx = np.argmax(pred)
         predictions.append(idx)
     most_common_idx = Counter(predictions).most_common(1)[0][0]
