@@ -3,8 +3,10 @@ import pandas as pd
 import joblib
 import tensorflow as tf
 from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import StandardScaler, MinMaxScaler, QuantileTransformer
+from  tensorflow.keras import Input
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense
+from tensorflow.keras.layers import Dense, BatchNormalization, Dropout
 
 
 def train_and_save(dataset_path, model_path, encoder_path, avg_eff_path):
@@ -14,10 +16,12 @@ def train_and_save(dataset_path, model_path, encoder_path, avg_eff_path):
     data['frequency'] = pd.to_numeric(data['frequency'], errors='coerce')
     eff_col = data.columns[2]  # shielding_eff или absorption_eff или reflection_eff
     data[eff_col] = pd.to_numeric(data[eff_col], errors='coerce')
+    data[eff_col] = np.log1p(data[eff_col])
     data.dropna(subset=['frequency', eff_col], inplace=True)
 
     # Вход и метки
-    X = data[['frequency', eff_col]].values
+    scaler = QuantileTransformer(output_distribution='normal', random_state=0)
+    X = scaler.fit_transform(data[['frequency', eff_col]].values)
     le = LabelEncoder()
     y_enc = le.fit_transform(data['material'])
     num_classes = len(le.classes_)
@@ -28,18 +32,25 @@ def train_and_save(dataset_path, model_path, encoder_path, avg_eff_path):
 
     # Построение и обучение модели
     model = Sequential([
-        Dense(10, activation='relu', input_shape=(2,)),
-        Dense(10, activation='relu'),
+        Input(shape=(2,)),
+        BatchNormalization(),
+        tf.keras.layers.LeakyReLU(),
+        Dropout(0.2),
+        Dense(64),
+        BatchNormalization(),
+        tf.keras.layers.LeakyReLU(),
+        Dropout(0.2),
         Dense(num_classes, activation='softmax')
     ])
     model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
-    model.fit(X, y_onehot, epochs=100, verbose=1)
+    model.fit(X, y_onehot, epochs=500, verbose=1)
 
     # Сохранение модели, энкодера и среднего словаря
     model.save(model_path)
     joblib.dump(le, encoder_path)
     joblib.dump(avg_eff, avg_eff_path)
-    print(f"Saved: {model_path}, {encoder_path}, {avg_eff_path}")
+    joblib.dump(scaler, model_path.replace('.keras', 'scaler.pkl'))
+    print(f"Saved: {model_path}, {encoder_path}, {avg_eff_path}, {model_path.replace('.keras', 'scaler.pkl')}")
 
 
 if __name__ == '__main__':
