@@ -49,10 +49,8 @@ def predict_most_frequent_material(model_dir, freq_start, freq_end, eff_value):
 # Шаблоны слоёв
 def create_composite(model_dir, freq_start, freq_end, min_value, base_layers):
     material, conf, avg = predict_most_frequent_material(model_dir, freq_start, freq_end, min_value)
-    if avg < min_value:
-        desc = f"Предсказанный материал — {material} (среднее {avg:.3f}) не удовлетворяет min={min_value}."
-    else:
-        desc = f"Предсказанный материал — {material} (среднее {avg:.3f}, уверенность {conf:.3f})."
+    desc = f"Предсказанный материал — {material}"
+
     composite = base_layers.copy()
     for k in composite:
         if "слой" in k.lower() and "материал" in composite[k].lower():
