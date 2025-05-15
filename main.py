@@ -1,87 +1,63 @@
-
-# app.py
 import numpy as np
 import streamlit as st
 import joblib
 import tensorflow as tf
+import os
 from collections import Counter
 
-# Загрузка предобученных моделей и артефактов
-model_shielding = tf.keras.models.load_model('model_ee.keras')
-le_shielding = joblib.load('le_ee.pkl')
-avg_eff_shielding = joblib.load('avg_eff_ee.pkl')
+# Определение папок для разных критериев
+MODEL_DIRS = {
+    "Эффективность экранирования": "models_ee",
+    "Коэффициент поглощения": "models_kp",
+    "Коэффициент отражения": "models_ko"
+}
 
-model_absorption = tf.keras.models.load_model('model_kp.keras')
-le_absorption = joblib.load('le_kp.pkl')
-avg_eff_absorption = joblib.load('avg_eff_kp.pkl')
+# Универсальная функция предсказания кластера и материала
+def predict_most_frequent_material(model_dir, freq_start, freq_end, eff_value):
+    # Загрузка кластерного классификатора и нормализатора
+    cluster_model = tf.keras.models.load_model(os.path.join(model_dir, 'cluster_classifier.keras'))
+    scaler_global = joblib.load(os.path.join(model_dir, 'cluster_scaler.pkl'))
 
-model_reflection = tf.keras.models.load_model('model_ko.keras')
-le_reflection = joblib.load('le_ko.pkl')
-avg_eff_reflection = joblib.load('avg_eff_ko.pkl')
+    # Определение кластера
+    cluster_inputs = np.array([[f, eff_value] for f in range(int(freq_start), int(freq_end) + 1)])
+    cluster_inputs_scaled = scaler_global.transform(cluster_inputs)
+    cluster_probs = cluster_model.predict(cluster_inputs_scaled)
+    cluster_preds = np.argmax(cluster_probs, axis=1)
+    most_common_cluster = Counter(cluster_preds).most_common(1)[0][0]
 
-# Универсальная функция предсказания наиболее частого материала
+    # Загрузка соответствующей модели и энкодера
+    model_path = os.path.join(model_dir, f'model_cluster_{most_common_cluster}.keras')
+    le_path = os.path.join(model_dir, f'label_encoder_cluster_{most_common_cluster}.pkl')
+    scaler_path = os.path.join(model_dir, f'scaler_cluster_{most_common_cluster}.pkl')
+    avg_eff_path = os.path.join(model_dir, f'avg_eff_cluster_{most_common_cluster}.pkl')
 
-def predict_most_frequent_material(model, le, freq_start, freq_end):
-    freqs = np.arange(freq_start, freq_end + 1, 1)
-    predictions = []
-    for f in freqs:
-        input_data = np.array([[f, min_val]])  # два признака
-        pred = model.predict(input_data, verbose=0)
-        idx = np.argmax(pred)
-        predictions.append(idx)
+    model = tf.keras.models.load_model(model_path)
+    le = joblib.load(le_path)
+    scaler = joblib.load(scaler_path)
+    avg_eff = joblib.load(avg_eff_path)
+
+    # Предсказание материала по диапазону частот
+    X_input = np.array([[f, eff_value] for f in range(int(freq_start), int(freq_end) + 1)])
+    X_input_scaled = scaler.transform(X_input)
+    predictions = [np.argmax(model.predict(np.expand_dims(x, axis=0), verbose=0)) for x in X_input_scaled]
     most_common_idx = Counter(predictions).most_common(1)[0][0]
     material = le.inverse_transform([most_common_idx])[0]
     confidence = predictions.count(most_common_idx) / len(predictions)
-    return material, confidence
+    avg = avg_eff.get(material, 0)
+    return material, confidence, avg
 
-# Функции для формирования композитов
-
-def create_shielding_composite(freq_start, freq_end, min_value):
-    material, conf = predict_most_frequent_material(model_shielding, le_shielding, freq_start, freq_end)
-    avg = avg_eff_shielding.get(material, 0)
-    if avg < min_value:
-        desc = f"Предсказанный материал — {material} (средняя {avg:.3f}) не удовлетворяет min={min_value}."
-    else:
-        desc = f"Предсказанный материал — {material} (средняя {avg:.3f}, уверенность {conf:.3f})."
-    return {
-        "1. Защитный внешний слой": "Полиуретановое покрытие",
-        "2. Экранирующий металлический слой": desc,
-        "3. Диэлектрический слой с армирующей сеткой": "Полиимид с армирующей сеткой",
-        "4. Поглощающий внутренний слой (опционально)": "Графен",
-        "5. Внутренний защитный слой": "Полиуретановое покрытие"
-    }
-
-
-def create_absorption_composite(freq_start, freq_end, min_value):
-    material, conf = predict_most_frequent_material(model_absorption, le_absorption, freq_start, freq_end)
-    avg = avg_eff_absorption.get(material, 0)
+# Шаблоны слоёв
+def create_composite(model_dir, freq_start, freq_end, min_value, base_layers):
+    material, conf, avg = predict_most_frequent_material(model_dir, freq_start, freq_end, min_value)
     if avg < min_value:
         desc = f"Предсказанный материал — {material} (среднее {avg:.3f}) не удовлетворяет min={min_value}."
     else:
         desc = f"Предсказанный материал — {material} (среднее {avg:.3f}, уверенность {conf:.3f})."
-    return {
-        "1. Внешний демпфирующий слой": "Полиуретан",
-        "2. Магнитный слой на основе феррита": "Никель-цинковый феррит",
-        "3. Поглощающий композитный слой": desc,
-        "4. Полимерная прослойка (опционально для гибкости)": "Графен",
-        "5. Внутренний структурный слой": "Стекловолокно"
-    }
-
-
-def create_reflection_composite(freq_start, freq_end, min_value):
-    material, conf = predict_most_frequent_material(model_reflection, le_reflection, freq_start, freq_end)
-    avg = avg_eff_reflection.get(material, 0)
-    if avg < min_value:
-        desc = f"Предсказанный материал — {material} (среднее {avg:.3f}) не удовлетворяет min={min_value}."
-    else:
-        desc = f"Предсказанный материал — {material} (среднее {avg:.3f}, уверенность {conf:.3f})."
-    return {
-        "1. Защитный внешний слой": "Полиуретановое покрытие",
-        "2. Отражающий металлический слой": desc,
-        "3. Импеданс-согласующий слой": "Пористая керамика",
-        "4. Углеродный слой": "Углеродные нанотрубки",
-        "5. Подложка из диэлектрика": "Полиимид"
-    }
+    composite = base_layers.copy()
+    for k in composite:
+        if "слой" in k.lower() and "материал" in composite[k].lower():
+            composite[k] = desc
+    return composite
 
 # Streamlit-интерфейс
 st.title("Состав композитного материала")
@@ -90,17 +66,41 @@ criteria = st.selectbox(
     ["Эффективность экранирования", "Коэффициент поглощения", "Коэффициент отражения"]
 )
 
-freq_start = st.number_input("Начальная частота", value=1.0)
-freq_end = st.number_input("Конечная частота", value=10.0)
-min_val = st.number_input("Минимальное требуемое значение", value=1.0)
+freq_start = st.number_input("Начальная частота (ГГц)", value=1.0)
+freq_end = st.number_input("Конечная частота (ГГц)", value=10.0)
+min_val = st.number_input("Минимальное требуемое значение эффективности", value=1.0)
 
 if st.button("Рассчитать"):
+    model_dir = MODEL_DIRS[criteria]
+
     if criteria == "Эффективность экранирования":
-        comp = create_shielding_composite(freq_start, freq_end, min_val)
+        base_layers = {
+            "1. Защитный внешний слой": "Полиуретановое покрытие",
+            "2. Экранирующий металлический слой": "Материал рассчитывается",
+            "3. Диэлектрический слой с армирующей сеткой": "Полиимид с армирующей сеткой",
+            "4. Поглощающий внутренний слой (опционально)": "Графен",
+            "5. Внутренний защитный слой": "Полиуретановое покрытие"
+        }
+
     elif criteria == "Коэффициент поглощения":
-        comp = create_absorption_composite(freq_start, freq_end, min_val)
+        base_layers = {
+            "1. Внешний демпфирующий слой": "Полиуретан",
+            "2. Магнитный слой на основе феррита": "Никель-цинковый феррит",
+            "3. Поглощающий композитный слой": "Материал рассчитывается",
+            "4. Полимерная прослойка (опционально для гибкости)": "Графен",
+            "5. Внутренний структурный слой": "Стекловолокно"
+        }
+
     else:
-        comp = create_reflection_composite(freq_start, freq_end, min_val)
+        base_layers = {
+            "1. Защитный внешний слой": "Полиуретановое покрытие",
+            "2. Отражающий металлический слой": "Материал рассчитывается",
+            "3. Импеданс-согласующий слой": "Пористая керамика",
+            "4. Углеродный слой": "Углеродные нанотрубки",
+            "5. Подложка из диэлектрика": "Полиимид"
+        }
+
+    comp = create_composite(model_dir, freq_start, freq_end, min_val, base_layers)
 
     st.subheader("Итоговый состав:")
     for layer, detail in comp.items():
